@@ -1,10 +1,10 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import {
-  Dimensions,
   FlatList,
   StyleSheet,
   View,
   ScrollView,
+  useWindowDimensions,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -18,12 +18,11 @@ import { palette, spacing } from '../../ui/theme';
 import type { LibraryStackParamList } from '../../navigation/screens';
 import type { DocumentRecord } from '../../types/models';
 
-const { width: WINDOW_WIDTH, height: WINDOW_HEIGHT } = Dimensions.get('window');
-
 export function DocumentViewerScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<LibraryStackParamList, 'DocumentViewer'>>();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { year, month, documentId } = route.params;
 
   const { documents } = useFolderDocuments(year, month);
@@ -40,15 +39,27 @@ export function DocumentViewerScreen() {
     setCurrentIndex(initialIndex);
   }, [initialIndex]);
 
-  const handleScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const idx = Math.round(event.nativeEvent.contentOffset.x / WINDOW_WIDTH);
-    setCurrentIndex(idx);
-  }, []);
+  const handleScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const idx = Math.round(event.nativeEvent.contentOffset.x / windowWidth);
+      setCurrentIndex(idx);
+    },
+    [windowWidth],
+  );
+
+  const pageStyle = useMemo(
+    () => [styles.page, { width: windowWidth, height: windowHeight }],
+    [windowWidth, windowHeight],
+  );
+  const imageStyle = useMemo(
+    () => ({ width: windowWidth, height: windowHeight }),
+    [windowWidth, windowHeight],
+  );
 
   const renderItem = useCallback(
     ({ item }: { item: DocumentRecord }) => (
       <ScrollView
-        style={styles.page}
+        style={pageStyle}
         contentContainerStyle={styles.pageContent}
         maximumZoomScale={4}
         minimumZoomScale={1}
@@ -59,13 +70,13 @@ export function DocumentViewerScreen() {
       >
         <ExpoImage
           source={item.filePath}
-          style={styles.image}
+          style={imageStyle}
           contentFit="contain"
           cachePolicy="memory-disk"
         />
       </ScrollView>
     ),
-    [],
+    [pageStyle, imageStyle],
   );
 
   if (documents.length === 0) {
@@ -82,7 +93,7 @@ export function DocumentViewerScreen() {
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         initialScrollIndex={initialIndex}
-        getItemLayout={(_, i) => ({ length: WINDOW_WIDTH, offset: WINDOW_WIDTH * i, index: i })}
+        getItemLayout={(_, i) => ({ length: windowWidth, offset: windowWidth * i, index: i })}
         onMomentumScrollEnd={handleScrollEnd}
         renderItem={renderItem}
       />
@@ -108,9 +119,8 @@ export function DocumentViewerScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  page: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT, backgroundColor: '#000' },
+  page: { backgroundColor: '#000' },
   pageContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
-  image: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT },
   topBar: {
     position: 'absolute',
     top: 0,
