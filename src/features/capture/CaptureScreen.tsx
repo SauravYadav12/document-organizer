@@ -10,6 +10,7 @@ import DocumentScanner, {
 } from 'react-native-document-scanner-plugin';
 
 import { palette, spacing } from '../../ui/theme';
+import { useEntitlement } from '../../subscription/useEntitlement';
 import type { CaptureStackParamList } from '../../navigation/screens';
 
 type Nav = NativeStackNavigationProp<CaptureStackParamList, 'Capture'>;
@@ -20,6 +21,7 @@ export function CaptureScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ErrorKind | null>(null);
   const launchedRef = useRef(false);
+  const { requireEntitlement } = useEntitlement();
 
   const leaveCapture = useCallback(() => {
     navigation.getParent()?.navigate('LibraryTab');
@@ -27,6 +29,12 @@ export function CaptureScreen() {
 
   const launchScanner = useCallback(async () => {
     if (launchedRef.current) return;
+    // Gate here too so users who tap the Capture tab directly (rather than the
+    // library FAB) still hit the paywall before the camera launches.
+    if (!requireEntitlement()) {
+      leaveCapture();
+      return;
+    }
     launchedRef.current = true;
     setBusy(true);
     setError(null);

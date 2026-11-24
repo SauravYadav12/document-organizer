@@ -1,6 +1,6 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { StyleSheet, View, FlatList } from 'react-native';
-import { FAB } from 'react-native-paper';
+import { FAB, IconButton } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import { MotiView } from 'moti';
 
@@ -9,11 +9,26 @@ import { useYearList } from './useLibraryData';
 import { EmptyState } from '../../ui/EmptyState';
 import { palette, spacing } from '../../ui/theme';
 import { staggerStep, timingTransition } from '../../ui/motion';
+import { useEntitlement } from '../../subscription/useEntitlement';
+import { SubscriptionBanner } from '../../subscription/SubscriptionBanner';
 import type { YearSummary } from '../../types/models';
 
 export function HomeScreen() {
   const navigation = useNavigation<any>();
   const { years, isLoading } = useYearList();
+  const { requireEntitlement } = useEntitlement();
+
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <IconButton
+          icon="cog-outline"
+          onPress={() => navigation.navigate('Settings')}
+          accessibilityLabel="Settings"
+        />
+      ),
+    });
+  }, [navigation]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: YearSummary; index: number }) => (
@@ -42,6 +57,7 @@ export function HomeScreen() {
         contentContainerStyle={styles.listContent}
         contentInsetAdjustmentBehavior="automatic"
         renderItem={renderItem}
+        ListHeaderComponent={<SubscriptionBanner />}
         ListEmptyComponent={
           isLoading ? undefined : (
             <EmptyState
@@ -54,7 +70,10 @@ export function HomeScreen() {
       />
       <FAB
         icon="camera-plus"
-        onPress={() => navigation.navigate('CaptureTab', { screen: 'Capture' })}
+        onPress={() => {
+          if (!requireEntitlement()) return;
+          navigation.navigate('CaptureTab', { screen: 'Capture' });
+        }}
         style={styles.fab}
         color={palette.white}
       />

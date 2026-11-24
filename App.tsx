@@ -19,6 +19,7 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { SnackbarHost } from './src/ui/SnackbarHost';
 import { getDatabase } from './src/db/database';
 import { ensureStorageReady } from './src/services/fileStorageService';
+import { SubscriptionProvider } from './src/subscription/SubscriptionProvider';
 
 export default function App() {
   const systemScheme = useColorScheme();
@@ -60,9 +61,11 @@ export default function App() {
       <SafeAreaProvider>
         <PaperProvider theme={paperTheme}>
           <NavigationContainer theme={navigationTheme}>
-            <RootNavigator />
-            <SnackbarHost />
-            <StatusBar style={isDark ? 'light' : 'dark'} />
+            <SubscriptionProvider>
+              <RootNavigator />
+              <SnackbarHost />
+              <StatusBar style={isDark ? 'light' : 'dark'} />
+            </SubscriptionProvider>
           </NavigationContainer>
         </PaperProvider>
       </SafeAreaProvider>

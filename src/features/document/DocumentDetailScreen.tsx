@@ -17,6 +17,7 @@ import { insertActivity } from '../../db/activityRepository';
 import { deleteFile, fileExists, getFileSizeBytes } from '../../services/fileStorageService';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { notifyLibraryChanged } from '../../stores/libraryStore';
+import { useEntitlement } from '../../subscription/useEntitlement';
 import type { LibraryStackParamList } from '../../navigation/screens';
 import type { DocumentRecord } from '../../types/models';
 
@@ -30,6 +31,7 @@ export function DocumentDetailScreen() {
   const route = useRoute<RouteProp<LibraryStackParamList, 'DocumentDetail'>>();
   const showSnackbar = useSnackbar((s) => s.show);
   const folderShare = useFolderShare();
+  const { requireEntitlement } = useEntitlement();
 
   const [document, setDocument] = useState<DocumentRecord | null>(null);
   const [editedTitle, setEditedTitle] = useState('');
@@ -104,17 +106,29 @@ export function DocumentDetailScreen() {
     if (!document) return;
     if (action === 'move') {
       navigation.navigate('MoveDocument', { documentId: document.id });
-    } else if (action === 'share' || action === 'pdf') {
+    } else if (action === 'share') {
+      // Opens the sheet with BOTH options. The sheet's PDF button gates
+      // to the paywall; the original-photo button stays free so users
+      // can always get their own scans off the device.
       if (isFileMissing) {
         showSnackbar({ message: 'Original photo is missing — nothing to share', kind: 'info' });
         return;
       }
+      setShareSheetVisible(true);
+    } else if (action === 'pdf') {
+      if (isFileMissing) {
+        showSnackbar({ message: 'Original photo is missing — nothing to share', kind: 'info' });
+        return;
+      }
+      // Direct PDF action is a Pro feature.
+      if (!requireEntitlement()) return;
       setShareSheetVisible(true);
     } else if (action === 'print') {
       if (isFileMissing) {
         showSnackbar({ message: 'Original photo is missing — nothing to print', kind: 'info' });
         return;
       }
+      if (!requireEntitlement()) return;
       printDocument();
     } else if (action === 'delete') {
       confirmDelete();
@@ -282,11 +296,17 @@ export function DocumentDetailScreen() {
         title="this document"
         documents={[document]}
         isExporting={folderShare.isExporting}
-        onExportPdf={() =>
+        onExportPdf={() => {
+          // Gate at the exact moment the user commits to a PDF export so the
+          // free "Share original photo" option in the same sheet stays open.
+          if (!requireEntitlement()) {
+            setShareSheetVisible(false);
+            return;
+          }
           folderShare.sharePdf({ title: `DocOrg-doc-${document.id}`, documents: [document] }).finally(() =>
             setShareSheetVisible(false),
-          )
-        }
+          );
+        }}
         onExportZip={() =>
           folderShare.shareZip({ title: `DocOrg-doc-${document.id}`, documents: [document] }).finally(() =>
             setShareSheetVisible(false),
