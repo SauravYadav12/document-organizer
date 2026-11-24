@@ -33,6 +33,15 @@ const PDF_IMAGE_MAX_W = 700;
 const PDF_IMAGE_MAX_H = 900;
 const PDF_IMAGE_QUALITY = 0.82;
 
+/**
+ * Use `page-break-before: always` on every page except the first, with no
+ * `page-break-after` anywhere. The previous template put
+ * `page-break-after: always` on each `.page`, which WKWebView's print
+ * formatter was interpreting as "end this page AND start a new one",
+ * emitting a blank page after each image. The before-based pattern is the
+ * CSS standard way to force each element onto its own page without
+ * producing adjacent breaks.
+ */
 const PAGE_HTML_HEAD = `
   <meta charset="utf-8" />
   <style>
@@ -40,11 +49,13 @@ const PAGE_HTML_HEAD = `
     html, body { margin: 0; padding: 0; background: #fff; }
     body { font-family: -apple-system, system-ui, sans-serif; color: #0F172A; }
     .page {
-      page-break-after: always;
       page-break-inside: avoid;
       break-inside: avoid;
     }
-    .page:last-child { page-break-after: auto; }
+    .page + .page {
+      page-break-before: always;
+      break-before: page;
+    }
     .title { font-size: 13px; font-weight: 600; margin: 0 0 1mm 0; }
     .meta { font-size: 10px; color: #64748B; margin: 0 0 3mm 0; }
     img {
