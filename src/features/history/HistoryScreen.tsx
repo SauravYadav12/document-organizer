@@ -7,7 +7,7 @@ import { ActivityRow } from './ActivityRow';
 import { useActivityFeed } from './useActivityFeed';
 import { EmptyState } from '../../ui/EmptyState';
 import { palette, spacing } from '../../ui/theme';
-import { staggerStep } from '../../ui/motion';
+import { staggerStep, timingTransition } from '../../ui/motion';
 import type { ActivityRecord } from '../../types/models';
 
 export function HistoryScreen() {
@@ -19,7 +19,7 @@ export function HistoryScreen() {
       <MotiView
         from={{ opacity: 0, translateY: 6 }}
         animate={{ opacity: 1, translateY: 0 }}
-        transition={{ type: 'timing', duration: 240, delay: Math.min(index, 10) * staggerStep }}
+        transition={timingTransition(240, Math.min(index, 10) * staggerStep)}
       >
         <ActivityRow
           activity={item}
@@ -45,7 +45,7 @@ export function HistoryScreen() {
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          isLoading ? null : (
+          isLoading ? undefined : (
             <EmptyState
               icon="clock-outline"
               title="No activity yet"

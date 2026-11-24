@@ -4,6 +4,7 @@ import { Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { MotiView } from 'moti';
 import { palette, spacing } from './theme';
+import { timingTransition } from './motion';
 
 type Props = {
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
@@ -17,7 +18,7 @@ export function EmptyState({ icon, title, subtitle }: Props) {
       <MotiView
         from={{ scale: 0.92, opacity: 0.5 }}
         animate={{ scale: 1, opacity: 1 }}
-        transition={{ loop: true, type: 'timing', duration: 1800 }}
+        transition={timingTransition(1800, 0, true)}
         style={styles.iconWrapper}
       >
         <MaterialCommunityIcons name={icon} size={64} color={palette.primary} />

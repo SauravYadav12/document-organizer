@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { MotiView } from 'moti';
 import type { DateSource } from '../../types/models';
 import { palette, radii, spacing } from '../../ui/theme';
+import { timingTransition } from '../../ui/motion';
 
 type Props = {
   date: Date;
@@ -39,7 +40,7 @@ export function DateConfirmCard({ date, source, isDetecting }: Props) {
         key={`${day}-${month}-${year}`}
         from={{ opacity: 0, translateY: 8 }}
         animate={{ opacity: 1, translateY: 0 }}
-        transition={{ type: 'timing', duration: 280 }}
+        transition={timingTransition(280)}
       >
         <Text style={styles.dateBig}>
           {month} {day}, {year}
@@ -50,7 +51,7 @@ export function DateConfirmCard({ date, source, isDetecting }: Props) {
         <MotiView
           from={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ type: 'timing', duration: 240, delay: 120 }}
+          transition={timingTransition(240, 120)}
           style={[styles.badge, badgeStyleFor(source)]}
         >
           <MaterialCommunityIcons name={badgeIconFor(source)} size={14} color={badgeIconColorFor(source)} />

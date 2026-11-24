@@ -8,7 +8,7 @@ import { YearCard } from './YearCard';
 import { useYearList } from './useLibraryData';
 import { EmptyState } from '../../ui/EmptyState';
 import { palette, spacing } from '../../ui/theme';
-import { staggerStep } from '../../ui/motion';
+import { staggerStep, timingTransition } from '../../ui/motion';
 import type { YearSummary } from '../../types/models';
 
 export function HomeScreen() {
@@ -20,7 +20,7 @@ export function HomeScreen() {
       <MotiView
         from={{ opacity: 0, translateY: 16 }}
         animate={{ opacity: 1, translateY: 0 }}
-        transition={{ type: 'timing', duration: 360, delay: index * staggerStep }}
+        transition={timingTransition(360, index * staggerStep)}
         style={styles.cell}
       >
         <YearCard
@@ -43,7 +43,7 @@ export function HomeScreen() {
         contentInsetAdjustmentBehavior="automatic"
         renderItem={renderItem}
         ListEmptyComponent={
-          isLoading ? null : (
+          isLoading ? undefined : (
             <EmptyState
               icon="image-multiple-outline"
               title="No documents yet"

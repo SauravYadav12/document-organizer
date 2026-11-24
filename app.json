@@ -16,7 +16,6 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.docorg.app",
-      "buildReactNativeFromSource": true,
       "infoPlist": {
         "NSCameraUsageDescription": "DocOrg uses the camera to capture your documents. Photos stay on your device.",
         "NSPhotoLibraryUsageDescription": "DocOrg can read existing photos to add them to your library.",
@@ -30,7 +29,11 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"],
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -43,8 +46,19 @@
       "expo-sharing",
       "expo-sqlite",
       "@react-native-community/datetimepicker",
-      ["expo-camera", { "cameraPermission": "Allow DocOrg to access your camera so you can photograph documents." }],
-      ["react-native-document-scanner-plugin", { "cameraPermission": "Allow DocOrg to access your camera so you can scan documents." }]
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow DocOrg to access your camera so you can photograph documents."
+        }
+      ],
+      [
+        "react-native-document-scanner-plugin",
+        {
+          "cameraPermission": "Allow DocOrg to access your camera so you can scan documents."
+        }
+      ],
+      "expo-status-bar"
     ]
   }
 }

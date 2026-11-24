@@ -11,7 +11,7 @@ import { EmptyState } from '../../ui/EmptyState';
 import { ShareFolderSheet } from '../share/ShareFolderSheet';
 import { useFolderShare } from '../share/useFolderShare';
 import { palette, spacing } from '../../ui/theme';
-import { staggerStep } from '../../ui/motion';
+import { staggerStep, timingTransition } from '../../ui/motion';
 import type { LibraryStackParamList } from '../../navigation/screens';
 import type { DocumentRecord } from '../../types/models';
 
@@ -55,7 +55,7 @@ export function MonthScreen() {
       <MotiView
         from={{ opacity: 0, translateY: 10 }}
         animate={{ opacity: 1, translateY: 0 }}
-        transition={{ type: 'timing', duration: 280, delay: Math.min(index, 8) * staggerStep }}
+        transition={timingTransition(280, Math.min(index, 8) * staggerStep)}
         style={styles.tileWrapper}
       >
         <DocumentTile
