@@ -5,7 +5,8 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 const MAX_LONGEST_EDGE = 2000;
 const STORAGE_JPEG_QUALITY = 0.8;
 
-const ROOT_DIRECTORY = `${Paths.document.uri}docorg/`;
+const DOCUMENT_ROOT_MARKER = 'docorg/';
+const ROOT_DIRECTORY = `${Paths.document.uri}${DOCUMENT_ROOT_MARKER}`;
 const DOCUMENTS_DIRECTORY = `${ROOT_DIRECTORY}docs/`;
 const THUMBNAILS_DIRECTORY = `${ROOT_DIRECTORY}thumbs/`;
 const TEMP_DIRECTORY = `${ROOT_DIRECTORY}tmp/`;
@@ -106,4 +107,44 @@ export async function getFileSizeBytes(uri: string): Promise<number | null> {
   const file = new File(uri);
   if (!file.exists) return null;
   return file.size ?? null;
+}
+
+export function fileExists(uri: string): boolean {
+  try {
+    return new File(uri).exists;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Strip the current sandbox prefix from a URI so SQLite stores only the
+ * `docorg/...` portion. iOS reassigns the sandbox GUID in
+ * `/var/mobile/Containers/Data/Application/<GUID>/Documents/...` on
+ * reinstall (and sometimes on Xcode re-sign), which turns every stored
+ * absolute path into a dead reference. Any path that already looks relative
+ * is returned as-is.
+ */
+export function toRelativeAppPath(uri: string | null | undefined): string | null {
+  if (!uri) return null;
+  const markerIndex = uri.indexOf(DOCUMENT_ROOT_MARKER);
+  if (markerIndex >= 0) {
+    return uri.slice(markerIndex + DOCUMENT_ROOT_MARKER.length);
+  }
+  // Already relative — assume it's the `docs/.../file.jpg` form.
+  if (!uri.startsWith('file://') && !uri.startsWith('/')) {
+    return uri;
+  }
+  return null;
+}
+
+/**
+ * Resolve a path stored in SQLite (relative preferred) back to an absolute
+ * URI under the current sandbox. Absolute inputs are returned unchanged for
+ * backwards compatibility with rows written before this migration.
+ */
+export function toAbsoluteAppPath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (path.startsWith('file://') || path.startsWith('/')) return path;
+  return `${ROOT_DIRECTORY}${path}`;
 }

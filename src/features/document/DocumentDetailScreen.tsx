@@ -14,7 +14,8 @@ import { timingTransition } from '../../ui/motion';
 import { useSnackbar } from '../../ui/SnackbarHost';
 import { deleteDocument, getDocumentById, updateDocumentTitle } from '../../db/documentsRepository';
 import { insertActivity } from '../../db/activityRepository';
-import { deleteFile, getFileSizeBytes } from '../../services/fileStorageService';
+import { deleteFile, fileExists, getFileSizeBytes } from '../../services/fileStorageService';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { notifyLibraryChanged } from '../../stores/libraryStore';
 import type { LibraryStackParamList } from '../../navigation/screens';
 import type { DocumentRecord } from '../../types/models';
@@ -57,13 +58,19 @@ export function DocumentDetailScreen() {
     navigation.setOptions({ title: `${monthName} ${document.documentYear}` });
   }, [document, navigation]);
 
+  const [isFileMissing, setIsFileMissing] = useState(false);
+
   useEffect(() => {
     if (!document) return;
     let cancelled = false;
     (async () => {
-      const size = await getFileSizeBytes(document.filePath);
+      const [size, exists] = await Promise.all([
+        getFileSizeBytes(document.filePath),
+        Promise.resolve(fileExists(document.filePath)),
+      ]);
       if (cancelled) return;
       setFileInfo((prev) => ({ ...prev, sizeBytes: size }));
+      setIsFileMissing(!exists);
     })();
     return () => {
       cancelled = true;
@@ -98,8 +105,16 @@ export function DocumentDetailScreen() {
     if (action === 'move') {
       navigation.navigate('MoveDocument', { documentId: document.id });
     } else if (action === 'share' || action === 'pdf') {
+      if (isFileMissing) {
+        showSnackbar({ message: 'Original photo is missing — nothing to share', kind: 'info' });
+        return;
+      }
       setShareSheetVisible(true);
     } else if (action === 'print') {
+      if (isFileMissing) {
+        showSnackbar({ message: 'Original photo is missing — nothing to print', kind: 'info' });
+        return;
+      }
       printDocument();
     } else if (action === 'delete') {
       confirmDelete();
@@ -176,15 +191,33 @@ export function DocumentDetailScreen() {
               })
             }
           >
-            <ExpoImage
-              source={document.filePath}
-              style={styles.fullImage}
-              contentFit="contain"
-              cachePolicy="memory-disk"
-              transition={180}
-              onLoad={handleImageLoad}
-            />
-            <Text style={styles.zoomHint}>Tap to open · pinch to zoom</Text>
+            {isFileMissing ? (
+              <View style={[styles.fullImage, styles.missingWrap]}>
+                <MaterialCommunityIcons
+                  name="image-off-outline"
+                  size={48}
+                  color={palette.onSurfaceVariant}
+                />
+                <Text style={styles.missingTitle}>Original photo not found</Text>
+                <Text style={styles.missingBody}>
+                  This scan was saved before DocOrg could survive an iOS reinstall.
+                  The title and date are still here, but the image itself isn't on
+                  this device.
+                </Text>
+              </View>
+            ) : (
+              <ExpoImage
+                source={document.filePath}
+                style={styles.fullImage}
+                contentFit="contain"
+                cachePolicy="memory-disk"
+                transition={180}
+                onLoad={handleImageLoad}
+              />
+            )}
+            {!isFileMissing ? (
+              <Text style={styles.zoomHint}>Tap to open · pinch to zoom</Text>
+            ) : null}
           </Pressable>
         </MotiView>
 
@@ -308,6 +341,24 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 3 / 4,
     maxHeight: 480,
+  },
+  missingWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    padding: spacing.lg,
+  },
+  missingTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: palette.onSurface,
+  },
+  missingBody: {
+    fontSize: 12,
+    color: palette.onSurfaceVariant,
+    textAlign: 'center',
+    maxWidth: 320,
+    lineHeight: 16,
   },
   zoomHint: {
     fontSize: 11,
