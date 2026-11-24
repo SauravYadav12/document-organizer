@@ -1,59 +1,53 @@
 import * as Print from 'expo-print';
 import { File } from 'expo-file-system';
+import { Image as RNImage } from 'react-native';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import type { DocumentRecord } from '../types/models';
 
 /**
- * Previous attempts sized each `.page` as a hard 210×297mm box with
- * `@page { margin: 0 }`, but WKWebView's print formatter applies its own
- * printer margins on top of what the HTML asks for, so every page
- * overflowed by those margins and rendered as two sheets. Plus the image
- * header combined with an unbounded `img` could cause mid-image
- * pagination, splitting tall receipts across sheets.
+ * Previous attempts tried to constrain the image with CSS (`max-height`,
+ * `100vh`, `object-fit: contain`, hard A4 boxes), but WKWebView's print
+ * formatter in expo-print applies its own printer margins on top of
+ * whatever `@page` says and reports `vh` relative to the screen viewport,
+ * not the print area. Any image taller than the real print area got
+ * auto-paginated mid-image — top half on one page, bottom half with white
+ * on the next, then the forced page break added yet another sheet.
  *
- * This template works WITH the print formatter: let the formatter set the
- * sheet size and apply its margins, then make each `.page` fill exactly
- * one viewport-height (`100vh` inside that margined area) and lock
- * `page-break-inside: avoid`. The image lives in a flex `.image-slot`
- * with `max-height: 100%` + `object-fit: contain`, which can't exceed the
- * row's share of the page.
+ * This version pre-shrinks each source image to an upper bound that is
+ * guaranteed smaller than the print area under the most pessimistic
+ * assumption (US Letter + the formatter's 0.75" minimum margin). Because
+ * the image physically cannot overflow a page, the CSS can be trivial and
+ * the browser has nothing to paginate across.
  */
+
+// Cap the longest edge so an image at ~150 DPI comfortably fits an A4
+// print page (≈ 8" × 11" printable). Aspect ratio is preserved.
+const PDF_IMAGE_LONGEST_EDGE = 1500;
+const PDF_IMAGE_QUALITY = 0.82;
+
 const PAGE_HTML_HEAD = `
   <meta charset="utf-8" />
   <style>
-    @page { size: A4; margin: 10mm; }
+    @page { size: A4; margin: 12mm; }
     html, body { margin: 0; padding: 0; background: #fff; }
     body { font-family: -apple-system, system-ui, sans-serif; color: #0F172A; }
     .page {
-      box-sizing: border-box;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
       page-break-after: always;
       page-break-inside: avoid;
       break-inside: avoid;
-      overflow: hidden;
     }
     .page:last-child { page-break-after: auto; }
-    .page-header { flex: 0 0 auto; margin-bottom: 3mm; }
     .title { font-size: 13px; font-weight: 600; margin: 0 0 1mm 0; }
-    .meta { font-size: 10px; color: #64748B; margin: 0; }
-    .image-slot {
-      flex: 1 1 0;
-      min-height: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    }
-    .image-slot img {
+    .meta { font-size: 10px; color: #64748B; margin: 0 0 3mm 0; }
+    img {
+      display: block;
       max-width: 100%;
-      max-height: 100%;
+      max-height: 230mm;
       width: auto;
       height: auto;
-      object-fit: contain;
-      display: block;
+      margin: 0 auto;
     }
-    .cover { align-items: center; justify-content: center; text-align: center; }
+    .cover { text-align: center; padding-top: 80mm; }
     .cover h1 { font-size: 26px; color: #0F766E; margin: 0 0 5mm 0; }
     .cover p { color: #475569; margin: 1mm 0; font-size: 12px; }
   </style>
@@ -82,8 +76,6 @@ export async function buildPdfHtml({ title, documents }: BuildOptions): Promise<
     })),
   );
 
-  // Only include a cover when it earns its place: multi-document exports where
-  // the caller named the pack. A single-doc PDF goes straight to the image.
   const showCover = documents.length > 1;
   const cover = showCover
     ? `
@@ -101,13 +93,9 @@ export async function buildPdfHtml({ title, documents }: BuildOptions): Promise<
       const headingTitle = document.title?.trim() || dateLabel;
       return `
         <div class="page">
-          <div class="page-header">
-            <div class="title">${escapeHtml(headingTitle)}</div>
-            <div class="meta">${escapeHtml(dateLabel)}</div>
-          </div>
-          <div class="image-slot">
-            <img src="${imageSrc}" />
-          </div>
+          <div class="title">${escapeHtml(headingTitle)}</div>
+          <div class="meta">${escapeHtml(dateLabel)}</div>
+          <img src="${imageSrc}" />
         </div>
       `;
     })
@@ -122,27 +110,47 @@ export async function buildPdfFromDocuments(options: BuildOptions): Promise<stri
 }
 
 /**
- * Embed images as `data:` URIs so the PDF is self-contained. `file://` URLs
- * worked in the on-device WKWebView but left receivers (WhatsApp, Mail, the
- * iOS share preview) unable to render the PDF — they saw a question mark
- * placeholder because the original paths don't exist in their sandbox.
+ * Read and resize each source image so its longest edge is at most
+ * PDF_IMAGE_LONGEST_EDGE pixels, preserving aspect ratio. At ~150 DPI
+ * that maps to ~10 inches, which comfortably fits inside an A4 print
+ * page even after the formatter adds its own margins. The resized JPEG
+ * is then base64-embedded so the PDF is self-contained.
  */
 async function readImageAsDataUri(filePath: string): Promise<string> {
   try {
-    const base64 = await new File(filePath).base64();
-    const mime = inferMime(filePath);
-    return `data:${mime};base64,${base64}`;
+    const dims = await getImageDimensions(filePath);
+    const action =
+      dims && Math.max(dims.width, dims.height) > PDF_IMAGE_LONGEST_EDGE
+        ? [
+            {
+              resize:
+                dims.width >= dims.height
+                  ? { width: PDF_IMAGE_LONGEST_EDGE }
+                  : { height: PDF_IMAGE_LONGEST_EDGE },
+            },
+          ]
+        : [];
+    const resized = await manipulateAsync(filePath, action, {
+      compress: PDF_IMAGE_QUALITY,
+      format: SaveFormat.JPEG,
+    });
+    const base64 = await new File(resized.uri).base64();
+    return `data:image/jpeg;base64,${base64}`;
   } catch {
-    // Fall back to the raw path; the PDF will miss that page's image but still open.
+    // Fall back to the original path. The PDF may miss that page's image,
+    // but the file at least opens with the other pages intact.
     return filePath;
   }
 }
 
-function inferMime(filePath: string): string {
-  const ext = filePath.toLowerCase().split('.').pop();
-  if (ext === 'png') return 'image/png';
-  if (ext === 'heic' || ext === 'heif') return 'image/heic';
-  return 'image/jpeg';
+function getImageDimensions(uri: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    RNImage.getSize(
+      uri,
+      (width, height) => resolve({ width, height }),
+      () => resolve(null),
+    );
+  });
 }
 
 function formatDocumentDate(doc: DocumentRecord): string {
