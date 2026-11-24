@@ -3,51 +3,59 @@ import { File } from 'expo-file-system';
 import type { DocumentRecord } from '../types/models';
 
 /**
- * The old template let the browser auto-paginate each `.page` div, which
- * caused tall receipts to split across two sheets (top half on one page,
- * bottom half on the next) and the forced `page-break-after` then added a
- * blank behind it. Every page now gets a hard A4 box, breaks are forbidden
- * inside it, and the image shrinks with `object-fit: contain` to fill the
- * remaining space between the header and the sheet edge. One document →
- * one page, every time.
+ * Previous attempts sized each `.page` as a hard 210×297mm box with
+ * `@page { margin: 0 }`, but WKWebView's print formatter applies its own
+ * printer margins on top of what the HTML asks for, so every page
+ * overflowed by those margins and rendered as two sheets. Plus the image
+ * header combined with an unbounded `img` could cause mid-image
+ * pagination, splitting tall receipts across sheets.
+ *
+ * This template works WITH the print formatter: let the formatter set the
+ * sheet size and apply its margins, then make each `.page` fill exactly
+ * one viewport-height (`100vh` inside that margined area) and lock
+ * `page-break-inside: avoid`. The image lives in a flex `.image-slot`
+ * with `max-height: 100%` + `object-fit: contain`, which can't exceed the
+ * row's share of the page.
  */
 const PAGE_HTML_HEAD = `
   <meta charset="utf-8" />
   <style>
-    @page { size: A4; margin: 0; }
-    html, body { margin: 0; padding: 0; }
+    @page { size: A4; margin: 10mm; }
+    html, body { margin: 0; padding: 0; background: #fff; }
     body { font-family: -apple-system, system-ui, sans-serif; color: #0F172A; }
     .page {
-      width: 210mm;
-      height: 297mm;
       box-sizing: border-box;
-      padding: 12mm;
       display: flex;
       flex-direction: column;
+      height: 100vh;
       page-break-after: always;
       page-break-inside: avoid;
       break-inside: avoid;
+      overflow: hidden;
     }
     .page:last-child { page-break-after: auto; }
-    .page-header { flex: 0 0 auto; margin-bottom: 4mm; }
-    .title { font-size: 14px; font-weight: 600; margin: 0 0 2mm 0; }
-    .meta { font-size: 11px; color: #64748B; margin: 0; }
+    .page-header { flex: 0 0 auto; margin-bottom: 3mm; }
+    .title { font-size: 13px; font-weight: 600; margin: 0 0 1mm 0; }
+    .meta { font-size: 10px; color: #64748B; margin: 0; }
     .image-slot {
-      flex: 1 1 auto;
+      flex: 1 1 0;
       min-height: 0;
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: hidden;
     }
     .image-slot img {
       max-width: 100%;
       max-height: 100%;
+      width: auto;
+      height: auto;
       object-fit: contain;
       display: block;
     }
     .cover { align-items: center; justify-content: center; text-align: center; }
-    .cover h1 { font-size: 28px; color: #0F766E; margin: 0 0 6mm 0; }
-    .cover p { color: #475569; margin: 2mm 0; font-size: 13px; }
+    .cover h1 { font-size: 26px; color: #0F766E; margin: 0 0 5mm 0; }
+    .cover p { color: #475569; margin: 1mm 0; font-size: 12px; }
   </style>
 `;
 
