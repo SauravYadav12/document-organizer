@@ -12,8 +12,13 @@ type Props = {
   title: string;
   documents: DocumentRecord[];
   isExporting: boolean;
-  onExportPdf: () => void;
   onExportZip: () => void;
+  /**
+   * Only passed from single-document contexts (DocumentDetail). Folder-level
+   * share hides this: folders don't make sense as PDFs because they hold
+   * unrelated scans; a combined PDF comes from multi-select instead.
+   */
+  onExportPdf?: () => void;
 };
 
 export function ShareFolderSheet({
@@ -22,9 +27,14 @@ export function ShareFolderSheet({
   title,
   documents,
   isExporting,
-  onExportPdf,
   onExportZip,
+  onExportPdf,
 }: Props) {
+  const showPdf = typeof onExportPdf === 'function';
+  const zipDescription = showPdf
+    ? 'Original photo as sent by the camera.'
+    : 'Every original photo in one archive. To send one combined PDF, long-press a document and pick the ones you want.';
+
   return (
     <Portal>
       <Modal
@@ -38,23 +48,27 @@ export function ShareFolderSheet({
           {documents.length} {documents.length === 1 ? 'document' : 'documents'} · stays on your device until you send it
         </Text>
 
-        <View style={styles.optionsRow}>
+        {showPdf ? (
           <PressableScale onPress={onExportPdf} style={styles.optionCard} disabled={isExporting}>
             <View style={styles.optionIconWrap}>
               <MaterialCommunityIcons name="file-pdf-box" size={32} color={palette.primary} />
             </View>
-            <Text style={styles.optionTitle}>PDF</Text>
-            <Text style={styles.optionDesc}>One tidy file, opens anywhere.</Text>
-          </PressableScale>
-
-          <PressableScale onPress={onExportZip} style={styles.optionCard} disabled={isExporting}>
-            <View style={[styles.optionIconWrap, { backgroundColor: palette.accentContainer }]}>
-              <MaterialCommunityIcons name="folder-zip" size={32} color={'#92400E'} />
+            <View style={styles.optionText}>
+              <Text style={styles.optionTitle}>Share as PDF</Text>
+              <Text style={styles.optionDesc}>One tidy file, opens anywhere.</Text>
             </View>
-            <Text style={styles.optionTitle}>Originals</Text>
-            <Text style={styles.optionDesc}>ZIP of original photos.</Text>
           </PressableScale>
-        </View>
+        ) : null}
+
+        <PressableScale onPress={onExportZip} style={styles.optionCard} disabled={isExporting}>
+          <View style={[styles.optionIconWrap, styles.zipIconWrap]}>
+            <MaterialCommunityIcons name="folder-zip" size={32} color={'#92400E'} />
+          </View>
+          <View style={styles.optionText}>
+            <Text style={styles.optionTitle}>{showPdf ? 'Share original photo' : 'Share as ZIP'}</Text>
+            <Text style={styles.optionDesc}>{zipDescription}</Text>
+          </View>
+        </PressableScale>
 
         {isExporting ? (
           <View style={styles.exportingRow}>
@@ -88,18 +102,13 @@ const styles = StyleSheet.create({
   },
   heading: { fontSize: 18, fontWeight: '700', color: palette.onSurface },
   sub: { color: palette.onSurfaceVariant, fontSize: 13 },
-  optionsRow: {
+  optionCard: {
     flexDirection: 'row',
     gap: spacing.md,
-    marginTop: spacing.sm,
-  },
-  optionCard: {
-    flex: 1,
     backgroundColor: palette.surface,
     borderRadius: radii.lg,
     padding: spacing.lg,
-    alignItems: 'flex-start',
-    gap: 6,
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: palette.outline,
   },
@@ -110,10 +119,11 @@ const styles = StyleSheet.create({
     backgroundColor: palette.primaryContainer,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.sm,
   },
+  zipIconWrap: { backgroundColor: palette.accentContainer },
+  optionText: { flex: 1, gap: 4 },
   optionTitle: { fontSize: 16, fontWeight: '700', color: palette.onSurface },
-  optionDesc: { fontSize: 12, color: palette.onSurfaceVariant },
+  optionDesc: { fontSize: 12, color: palette.onSurfaceVariant, lineHeight: 16 },
   exportingRow: {
     flexDirection: 'row',
     alignItems: 'center',

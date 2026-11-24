@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Image as RNImage, Pressable, StyleSheet, View, ScrollView } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
+import { Alert, Pressable, StyleSheet, View, ScrollView } from 'react-native';
+import { Image as ExpoImage, type ImageLoadEventData } from 'expo-image';
 import { Text, TextInput, ActivityIndicator } from 'react-native-paper';
 import { useNavigation, useRoute, type RouteProp, useFocusEffect } from '@react-navigation/native';
 import { MotiView } from 'moti';
@@ -10,10 +10,12 @@ import { DocumentActionsBar } from './DocumentActionsBar';
 import { ShareFolderSheet } from '../share/ShareFolderSheet';
 import { useFolderShare } from '../share/useFolderShare';
 import { palette, radii, spacing } from '../../ui/theme';
+import { timingTransition } from '../../ui/motion';
 import { useSnackbar } from '../../ui/SnackbarHost';
 import { deleteDocument, getDocumentById, updateDocumentTitle } from '../../db/documentsRepository';
 import { insertActivity } from '../../db/activityRepository';
-import { deleteFile, getFileSizeBytes } from '../../services/fileStorageService';
+import { deleteFile, fileExists, getFileSizeBytes } from '../../services/fileStorageService';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { notifyLibraryChanged } from '../../stores/libraryStore';
 import type { LibraryStackParamList } from '../../navigation/screens';
 import type { DocumentRecord } from '../../types/models';
@@ -56,31 +58,31 @@ export function DocumentDetailScreen() {
     navigation.setOptions({ title: `${monthName} ${document.documentYear}` });
   }, [document, navigation]);
 
+  const [isFileMissing, setIsFileMissing] = useState(false);
+
   useEffect(() => {
     if (!document) return;
     let cancelled = false;
     (async () => {
-      const [size, dims] = await Promise.all([
+      const [size, exists] = await Promise.all([
         getFileSizeBytes(document.filePath),
-        new Promise<{ width: number; height: number } | null>((resolve) => {
-          RNImage.getSize(
-            document.filePath,
-            (width, height) => resolve({ width, height }),
-            () => resolve(null),
-          );
-        }),
+        Promise.resolve(fileExists(document.filePath)),
       ]);
       if (cancelled) return;
-      setFileInfo({
-        sizeBytes: size,
-        width: dims?.width ?? null,
-        height: dims?.height ?? null,
-      });
+      setFileInfo((prev) => ({ ...prev, sizeBytes: size }));
+      setIsFileMissing(!exists);
     })();
     return () => {
       cancelled = true;
     };
   }, [document]);
+
+  const handleImageLoad = useCallback((event: ImageLoadEventData) => {
+    const { width, height } = event.source ?? {};
+    if (typeof width === 'number' && typeof height === 'number') {
+      setFileInfo((prev) => ({ ...prev, width, height }));
+    }
+  }, []);
 
   if (!document) {
     return (
@@ -103,8 +105,16 @@ export function DocumentDetailScreen() {
     if (action === 'move') {
       navigation.navigate('MoveDocument', { documentId: document.id });
     } else if (action === 'share' || action === 'pdf') {
+      if (isFileMissing) {
+        showSnackbar({ message: 'Original photo is missing — nothing to share', kind: 'info' });
+        return;
+      }
       setShareSheetVisible(true);
     } else if (action === 'print') {
+      if (isFileMissing) {
+        showSnackbar({ message: 'Original photo is missing — nothing to print', kind: 'info' });
+        return;
+      }
       printDocument();
     } else if (action === 'delete') {
       confirmDelete();
@@ -133,16 +143,25 @@ export function DocumentDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             const snapshot = document;
+            try {
+              await deleteDocument(snapshot.id);
+            } catch (err) {
+              showSnackbar({ message: 'Delete failed', kind: 'error' });
+              return;
+            }
             await deleteFile(snapshot.filePath);
             await deleteFile(snapshot.thumbnailPath);
-            await deleteDocument(snapshot.id);
-            await insertActivity({
-              activityType: 'deleted',
-              documentId: null,
-              documentTitle: snapshot.title ?? snapshot.documentDate,
-              fromYear: snapshot.documentYear,
-              fromMonth: snapshot.documentMonth,
-            });
+            try {
+              await insertActivity({
+                activityType: 'deleted',
+                documentId: null,
+                documentTitle: snapshot.title ?? snapshot.documentDate,
+                fromYear: snapshot.documentYear,
+                fromMonth: snapshot.documentMonth,
+              });
+            } catch {
+              // Activity log is best-effort; the document is already deleted.
+            }
             notifyLibraryChanged();
             showSnackbar({ message: 'Document deleted', kind: 'info' });
             navigation.goBack();
@@ -160,7 +179,7 @@ export function DocumentDetailScreen() {
         <MotiView
           from={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ type: 'timing', duration: 320 }}
+          transition={timingTransition(320)}
         >
           <Pressable
             style={styles.imageWrap}
@@ -172,14 +191,33 @@ export function DocumentDetailScreen() {
               })
             }
           >
-            <ExpoImage
-              source={document.filePath}
-              style={styles.fullImage}
-              contentFit="contain"
-              cachePolicy="memory-disk"
-              transition={180}
-            />
-            <Text style={styles.zoomHint}>Tap to open · pinch to zoom</Text>
+            {isFileMissing ? (
+              <View style={[styles.fullImage, styles.missingWrap]}>
+                <MaterialCommunityIcons
+                  name="image-off-outline"
+                  size={48}
+                  color={palette.onSurfaceVariant}
+                />
+                <Text style={styles.missingTitle}>Original photo not found</Text>
+                <Text style={styles.missingBody}>
+                  This scan was saved before DocOrg could survive an iOS reinstall.
+                  The title and date are still here, but the image itself isn't on
+                  this device.
+                </Text>
+              </View>
+            ) : (
+              <ExpoImage
+                source={document.filePath}
+                style={styles.fullImage}
+                contentFit="contain"
+                cachePolicy="memory-disk"
+                transition={180}
+                onLoad={handleImageLoad}
+              />
+            )}
+            {!isFileMissing ? (
+              <Text style={styles.zoomHint}>Tap to open · pinch to zoom</Text>
+            ) : null}
           </Pressable>
         </MotiView>
 
@@ -303,6 +341,24 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 3 / 4,
     maxHeight: 480,
+  },
+  missingWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    padding: spacing.lg,
+  },
+  missingTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: palette.onSurface,
+  },
+  missingBody: {
+    fontSize: 12,
+    color: palette.onSurfaceVariant,
+    textAlign: 'center',
+    maxWidth: 320,
+    lineHeight: 16,
   },
   zoomHint: {
     fontSize: 11,

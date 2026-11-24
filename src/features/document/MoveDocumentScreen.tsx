@@ -60,8 +60,14 @@ export function MoveDocumentScreen() {
         actionLabel: 'Undo',
         onActionPress: async () => {
           const current = await getDocumentById(original.id);
-          if (current) {
+          if (!current) {
+            showSnackbar({ message: 'Undo unavailable — document was deleted', kind: 'info' });
+            return;
+          }
+          try {
             await performMove(current, original.documentYear, original.documentMonth);
+          } catch {
+            showSnackbar({ message: 'Undo failed', kind: 'error' });
           }
         },
       });
@@ -107,22 +113,36 @@ export function MoveDocumentScreen() {
 async function performMove(document: DocumentRecord, newYear: number, newMonth: number) {
   const newFileName = generateDocumentFileName(extensionOf(document.filePath));
   const newPath = buildDocumentPath(newYear, newMonth, newFileName);
-  await moveFile(document.filePath, newPath);
-  await updateDocumentFolder({
-    id: document.id,
-    newYear,
-    newMonth,
-    newFilePath: newPath,
-  });
-  await insertActivity({
-    activityType: 'moved',
-    documentId: document.id,
-    documentTitle: document.title ?? document.documentDate,
-    fromYear: document.documentYear,
-    fromMonth: document.documentMonth,
-    toYear: newYear,
-    toMonth: newMonth,
-  });
+  const originalPath = document.filePath;
+  await moveFile(originalPath, newPath);
+  try {
+    await updateDocumentFolder({
+      id: document.id,
+      newYear,
+      newMonth,
+      newFilePath: newPath,
+    });
+  } catch (err) {
+    try {
+      await moveFile(newPath, originalPath);
+    } catch {
+      // Best-effort rollback; the DB still points at the original path.
+    }
+    throw err;
+  }
+  try {
+    await insertActivity({
+      activityType: 'moved',
+      documentId: document.id,
+      documentTitle: document.title ?? document.documentDate,
+      fromYear: document.documentYear,
+      fromMonth: document.documentMonth,
+      toYear: newYear,
+      toMonth: newMonth,
+    });
+  } catch {
+    // Activity log is best-effort; the move itself has already committed.
+  }
   notifyLibraryChanged();
 }
 
