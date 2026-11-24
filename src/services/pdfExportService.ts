@@ -20,9 +20,17 @@ import type { DocumentRecord } from '../types/models';
  * the browser has nothing to paginate across.
  */
 
-// Cap the longest edge so an image at ~150 DPI comfortably fits an A4
-// print page (≈ 8" × 11" printable). Aspect ratio is preserved.
-const PDF_IMAGE_LONGEST_EDGE = 1500;
+/**
+ * Bound each dimension so the image, rendered at 1:1 CSS px in print
+ * context (96 CSS px per inch), fits inside the A4 printable area even
+ * once WKWebView's print formatter adds its own margins.
+ *   700 CSS px = 7.29in = 185mm wide (page width ≈ 186mm at 12mm margins)
+ *   900 CSS px = 9.37in = 238mm tall (page height ≈ 273mm, leaves room
+ *   for title+meta header plus a formatter margin bump)
+ * Aspect ratio is preserved; the image shrinks on whichever axis binds.
+ */
+const PDF_IMAGE_MAX_W = 700;
+const PDF_IMAGE_MAX_H = 900;
 const PDF_IMAGE_QUALITY = 0.82;
 
 const PAGE_HTML_HEAD = `
@@ -110,27 +118,24 @@ export async function buildPdfFromDocuments(options: BuildOptions): Promise<stri
 }
 
 /**
- * Read and resize each source image so its longest edge is at most
- * PDF_IMAGE_LONGEST_EDGE pixels, preserving aspect ratio. At ~150 DPI
- * that maps to ~10 inches, which comfortably fits inside an A4 print
- * page even after the formatter adds its own margins. The resized JPEG
- * is then base64-embedded so the PDF is self-contained.
+ * Read and resize each source image so BOTH dimensions fit inside
+ * (PDF_IMAGE_MAX_W × PDF_IMAGE_MAX_H), preserving aspect ratio. Earlier
+ * revisions only bounded the longest edge, which was fine for roughly
+ * square images but let tall receipts render at 10-12 inches in CSS pixels
+ * — overflowing the page even with `max-height: 230mm` and
+ * `page-break-inside: avoid` set, because WKWebView's print formatter
+ * silently ignored those directives and pushed the oversized image to the
+ * next page, leaving blanks behind.
+ *
+ * By computing the aspect-preserving scale against both axes before the
+ * manipulateAsync call, the embedded JPEG's natural CSS-pixel size cannot
+ * exceed the printable area regardless of orientation.
  */
 async function readImageAsDataUri(filePath: string): Promise<string> {
   try {
     const dims = await getImageDimensions(filePath);
-    const action =
-      dims && Math.max(dims.width, dims.height) > PDF_IMAGE_LONGEST_EDGE
-        ? [
-            {
-              resize:
-                dims.width >= dims.height
-                  ? { width: PDF_IMAGE_LONGEST_EDGE }
-                  : { height: PDF_IMAGE_LONGEST_EDGE },
-            },
-          ]
-        : [];
-    const resized = await manipulateAsync(filePath, action, {
+    const resize = dims ? computePageFitResize(dims.width, dims.height) : null;
+    const resized = await manipulateAsync(filePath, resize ? [{ resize }] : [], {
       compress: PDF_IMAGE_QUALITY,
       format: SaveFormat.JPEG,
     });
@@ -141,6 +146,21 @@ async function readImageAsDataUri(filePath: string): Promise<string> {
     // but the file at least opens with the other pages intact.
     return filePath;
   }
+}
+
+function computePageFitResize(
+  width: number,
+  height: number,
+): { width: number } | { height: number } | null {
+  const widthScale = PDF_IMAGE_MAX_W / width;
+  const heightScale = PDF_IMAGE_MAX_H / height;
+  const scale = Math.min(widthScale, heightScale);
+  if (scale >= 1) return null;
+  // Pick the binding axis and resize on that one so the aspect ratio stays
+  // exact — passing both to manipulateAsync would stretch the image.
+  return widthScale <= heightScale
+    ? { width: PDF_IMAGE_MAX_W }
+    : { height: PDF_IMAGE_MAX_H };
 }
 
 function getImageDimensions(uri: string): Promise<{ width: number; height: number } | null> {
