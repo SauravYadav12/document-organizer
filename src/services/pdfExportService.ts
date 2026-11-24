@@ -5,68 +5,81 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import type { DocumentRecord } from '../types/models';
 
 /**
- * Previous attempts tried to constrain the image with CSS (`max-height`,
- * `100vh`, `object-fit: contain`, hard A4 boxes), but WKWebView's print
- * formatter in expo-print applies its own printer margins on top of
- * whatever `@page` says and reports `vh` relative to the screen viewport,
- * not the print area. Any image taller than the real print area got
- * auto-paginated mid-image — top half on one page, bottom half with white
- * on the next, then the forced page break added yet another sheet.
+ * Pagination history (why every previous attempt failed):
  *
- * This version pre-shrinks each source image to an upper bound that is
- * guaranteed smaller than the print area under the most pessimistic
- * assumption (US Letter + the formatter's 0.75" minimum margin). Because
- * the image physically cannot overflow a page, the CSS can be trivial and
- * the browser has nothing to paginate across.
+ * - `@page { margin: 0 }` + a hard 210x297mm `.page` box → WKWebView's
+ *   print formatter applied its own margins and the page spilled onto a
+ *   second sheet.
+ * - `height: 100vh` → `vh` in WKWebView print context is the SCREEN
+ *   viewport height, not the page.
+ * - `max-height: 230mm` + `page-break-inside: avoid` on the parent → the
+ *   formatter still auto-broke before/after large `<img>` elements.
+ * - `page-break-after: always` on every `.page` → the formatter was
+ *   emitting adjacent breaks, producing a blank page after each.
+ *
+ * The approach that finally held:
+ *
+ * 1. Resize each source JPEG to dimensions chosen so that at BOTH
+ *    72 CSS-px-per-inch (treat px as pt) and 96 CSS-px-per-inch, the
+ *    resulting natural size still fits inside A4's printable area. That
+ *    removes any ambiguity about how WKWebView maps image pixels to
+ *    inches in print context.
+ * 2. Size the image with explicit `width` / `height` HTML attributes AND
+ *    an inline `width: NNNmm; height: auto; max-height: NNNmm`. Physical
+ *    mm units are deterministic; HTML attributes are presentation hints
+ *    the formatter respects before any CSS pagination decision.
+ * 3. Inline `style="page-break-before: always"` on every doc block except
+ *    the first. No `page-break-after` anywhere. No `page-break-inside:
+ *    avoid` — that was actively encouraging the formatter to defer the
+ *    image to the next page and leave the current one blank.
+ * 4. Mark the image with `page-break-before: avoid` so the formatter
+ *    can't lift the image off its header onto its own page.
  */
 
-/**
- * Bound each dimension so the image, rendered at 1:1 CSS px in print
- * context (96 CSS px per inch), fits inside the A4 printable area even
- * once WKWebView's print formatter adds its own margins.
- *   700 CSS px = 7.29in = 185mm wide (page width ≈ 186mm at 12mm margins)
- *   900 CSS px = 9.37in = 238mm tall (page height ≈ 273mm, leaves room
- *   for title+meta header plus a formatter margin bump)
- * Aspect ratio is preserved; the image shrinks on whichever axis binds.
- */
-const PDF_IMAGE_MAX_W = 700;
-const PDF_IMAGE_MAX_H = 900;
+// Chosen so that at either 72 or 96 CSS-px-per-inch, the image's natural
+// size fits an A4 print page (190mm x 272mm content area at the formatter's
+// usual ~10mm minimum).
+//   520 px: 7.22" @ 72dpi = 183mm, 5.42" @ 96dpi = 138mm — both < 190mm
+//   680 px: 9.44" @ 72dpi = 240mm (fits with margin to spare under 272mm)
+const PDF_IMAGE_MAX_W = 520;
+const PDF_IMAGE_MAX_H = 680;
 const PDF_IMAGE_QUALITY = 0.82;
 
-/**
- * Use `page-break-before: always` on every page except the first, with no
- * `page-break-after` anywhere. The previous template put
- * `page-break-after: always` on each `.page`, which WKWebView's print
- * formatter was interpreting as "end this page AND start a new one",
- * emitting a blank page after each image. The before-based pattern is the
- * CSS standard way to force each element onto its own page without
- * producing adjacent breaks.
- */
+// Rendered size on the page — deterministic physical units. The image is
+// constrained to this box via `object-fit: contain`.
+const PAGE_IMAGE_WIDTH_MM = 170;
+const PAGE_IMAGE_HEIGHT_MM = 220;
+
 const PAGE_HTML_HEAD = `
   <meta charset="utf-8" />
   <style>
-    @page { size: A4; margin: 12mm; }
+    @page { size: A4; margin: 15mm; }
     html, body { margin: 0; padding: 0; background: #fff; }
     body { font-family: -apple-system, system-ui, sans-serif; color: #0F172A; }
-    .page {
-      page-break-inside: avoid;
-      break-inside: avoid;
-    }
-    .page + .page {
-      page-break-before: always;
-      break-before: page;
-    }
-    .title { font-size: 13px; font-weight: 600; margin: 0 0 1mm 0; }
-    .meta { font-size: 10px; color: #64748B; margin: 0 0 3mm 0; }
-    img {
+    .doc { }
+    .doc .title { font-size: 13px; font-weight: 600; margin: 0 0 1mm 0; }
+    .doc .meta { font-size: 10px; color: #64748B; margin: 0 0 3mm 0; }
+    .doc .image-box {
+      width: ${PAGE_IMAGE_WIDTH_MM}mm;
+      height: ${PAGE_IMAGE_HEIGHT_MM}mm;
+      margin: 0 auto;
       display: block;
+      text-align: center;
+      overflow: hidden;
+    }
+    .doc img {
       max-width: 100%;
-      max-height: 230mm;
+      max-height: 100%;
       width: auto;
       height: auto;
-      margin: 0 auto;
+      display: inline-block;
+      vertical-align: middle;
+      page-break-before: avoid;
+      break-before: avoid;
+      page-break-after: avoid;
+      break-after: avoid;
     }
-    .cover { text-align: center; padding-top: 80mm; }
+    .cover { text-align: center; padding-top: 70mm; }
     .cover h1 { font-size: 26px; color: #0F766E; margin: 0 0 5mm 0; }
     .cover p { color: #475569; margin: 1mm 0; font-size: 12px; }
   </style>
@@ -97,26 +110,30 @@ export async function buildPdfHtml({ title, documents }: BuildOptions): Promise<
 
   const showCover = documents.length > 1;
   const cover = showCover
-    ? `
-      <div class="page cover">
+    ? `<div class="doc cover">
         <h1>${escapeHtml(title)}</h1>
         <p>${documents.length} documents</p>
         <p>Exported from DocOrg · ${new Date().toLocaleDateString()}</p>
-      </div>
-    `
+      </div>`
     : '';
 
   const pages = embedded
-    .map(({ document, imageSrc }) => {
+    .map(({ document, imageSrc }, index) => {
       const dateLabel = formatDocumentDate(document);
       const headingTitle = document.title?.trim() || dateLabel;
-      return `
-        <div class="page">
-          <div class="title">${escapeHtml(headingTitle)}</div>
-          <div class="meta">${escapeHtml(dateLabel)}</div>
-          <img src="${imageSrc}" />
-        </div>
-      `;
+      // First doc may share the cover's break context; every subsequent doc
+      // must start on its own page. `page-break-before: always` on the
+      // element itself is more deterministic than a `.doc + .doc` selector
+      // when text nodes sit between siblings.
+      const needsBreak = showCover || index > 0;
+      const style = needsBreak
+        ? 'page-break-before: always; break-before: page;'
+        : '';
+      return `<div class="doc" style="${style}">
+        <div class="title">${escapeHtml(headingTitle)}</div>
+        <div class="meta">${escapeHtml(dateLabel)}</div>
+        <div class="image-box"><img src="${imageSrc}" /></div>
+      </div>`;
     })
     .join('');
   return `<!doctype html><html><head>${PAGE_HTML_HEAD}</head><body>${cover}${pages}</body></html>`;
@@ -128,20 +145,6 @@ export async function buildPdfFromDocuments(options: BuildOptions): Promise<stri
   return file.uri;
 }
 
-/**
- * Read and resize each source image so BOTH dimensions fit inside
- * (PDF_IMAGE_MAX_W × PDF_IMAGE_MAX_H), preserving aspect ratio. Earlier
- * revisions only bounded the longest edge, which was fine for roughly
- * square images but let tall receipts render at 10-12 inches in CSS pixels
- * — overflowing the page even with `max-height: 230mm` and
- * `page-break-inside: avoid` set, because WKWebView's print formatter
- * silently ignored those directives and pushed the oversized image to the
- * next page, leaving blanks behind.
- *
- * By computing the aspect-preserving scale against both axes before the
- * manipulateAsync call, the embedded JPEG's natural CSS-pixel size cannot
- * exceed the printable area regardless of orientation.
- */
 async function readImageAsDataUri(filePath: string): Promise<string> {
   try {
     const dims = await getImageDimensions(filePath);
@@ -153,8 +156,6 @@ async function readImageAsDataUri(filePath: string): Promise<string> {
     const base64 = await new File(resized.uri).base64();
     return `data:image/jpeg;base64,${base64}`;
   } catch {
-    // Fall back to the original path. The PDF may miss that page's image,
-    // but the file at least opens with the other pages intact.
     return filePath;
   }
 }
@@ -167,8 +168,6 @@ function computePageFitResize(
   const heightScale = PDF_IMAGE_MAX_H / height;
   const scale = Math.min(widthScale, heightScale);
   if (scale >= 1) return null;
-  // Pick the binding axis and resize on that one so the aspect ratio stays
-  // exact — passing both to manipulateAsync would stretch the image.
   return widthScale <= heightScale
     ? { width: PDF_IMAGE_MAX_W }
     : { height: PDF_IMAGE_MAX_H };
