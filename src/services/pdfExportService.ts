@@ -1,4 +1,5 @@
 import * as Print from 'expo-print';
+import { File } from 'expo-file-system';
 import type { DocumentRecord } from '../types/models';
 
 const PAGE_HTML_HEAD = `
@@ -27,7 +28,12 @@ type BuildOptions = {
   documents: DocumentRecord[];
 };
 
-export function buildPdfHtml({ title, documents }: BuildOptions): string {
+type EmbeddedDocument = {
+  document: DocumentRecord;
+  imageSrc: string;
+};
+
+export async function buildPdfHtml({ title, documents }: BuildOptions): Promise<string> {
   const cover = `
     <div class="page cover">
       <h1>${escapeHtml(title)}</h1>
@@ -35,15 +41,21 @@ export function buildPdfHtml({ title, documents }: BuildOptions): string {
       <p>Exported from DocOrg · ${new Date().toLocaleDateString()}</p>
     </div>
   `;
-  const pages = documents
-    .map((doc) => {
-      const dateLabel = formatDocumentDate(doc);
-      const headingTitle = doc.title?.trim() || dateLabel;
+  const embedded = await Promise.all(
+    documents.map<Promise<EmbeddedDocument>>(async (document) => ({
+      document,
+      imageSrc: await readImageAsDataUri(document.filePath),
+    })),
+  );
+  const pages = embedded
+    .map(({ document, imageSrc }) => {
+      const dateLabel = formatDocumentDate(document);
+      const headingTitle = document.title?.trim() || dateLabel;
       return `
         <div class="page">
           <div class="title">${escapeHtml(headingTitle)}</div>
           <div class="meta">${escapeHtml(dateLabel)}</div>
-          <img src="${doc.filePath}" />
+          <img src="${imageSrc}" />
         </div>
       `;
     })
@@ -52,9 +64,33 @@ export function buildPdfHtml({ title, documents }: BuildOptions): string {
 }
 
 export async function buildPdfFromDocuments(options: BuildOptions): Promise<string> {
-  const html = buildPdfHtml(options);
+  const html = await buildPdfHtml(options);
   const file = await Print.printToFileAsync({ html, base64: false });
   return file.uri;
+}
+
+/**
+ * Embed images as `data:` URIs so the PDF is self-contained. `file://` URLs
+ * worked in the on-device WKWebView but left receivers (WhatsApp, Mail, the
+ * iOS share preview) unable to render the PDF — they saw a question mark
+ * placeholder because the original paths don't exist in their sandbox.
+ */
+async function readImageAsDataUri(filePath: string): Promise<string> {
+  try {
+    const base64 = await new File(filePath).base64();
+    const mime = inferMime(filePath);
+    return `data:${mime};base64,${base64}`;
+  } catch {
+    // Fall back to the raw path; the PDF will miss that page's image but still open.
+    return filePath;
+  }
+}
+
+function inferMime(filePath: string): string {
+  const ext = filePath.toLowerCase().split('.').pop();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'heic' || ext === 'heif') return 'image/heic';
+  return 'image/jpeg';
 }
 
 function formatDocumentDate(doc: DocumentRecord): string {
