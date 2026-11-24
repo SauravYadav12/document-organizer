@@ -1,5 +1,7 @@
 import * as chrono from 'chrono-node';
 
+export type DateLocaleOrder = 'dmy' | 'mdy';
+export type ParseDateOptions = { localeOrder?: DateLocaleOrder };
 export type ParsedDateResult = {
   date: Date;
   confidence: 'high' | 'medium' | 'low';
@@ -8,41 +10,89 @@ export type ParsedDateResult = {
 const REASONABLE_YEAR_MIN = 1990;
 const REASONABLE_YEAR_MAX = new Date().getFullYear() + 1;
 
-const NUMERIC_DATE_PATTERNS: Array<{ regex: RegExp; build: (m: RegExpMatchArray) => Date | null }> = [
-  // yyyy-mm-dd or yyyy/mm/dd
-  {
-    regex: /\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/,
-    build: (m) => makeDate(Number(m[1]), Number(m[2]), Number(m[3])),
+type NumericDatePattern = {
+  regex: RegExp;
+  build: (m: RegExpMatchArray) => Date | null;
+};
+
+/** `/` or `-` or `.` separated numeric dates with year first (unambiguous). */
+const ISO_FIRST: NumericDatePattern = {
+  regex: /\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/,
+  build: (m) => makeDate(Number(m[1]), Number(m[2]), Number(m[3])),
+};
+
+/** dd/mm/yyyy — day-first, year last. */
+const DMY_FULL: NumericDatePattern = {
+  regex: /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b/,
+  build: (m) => makeDate(Number(m[3]), Number(m[2]), Number(m[1])),
+};
+
+/** mm/dd/yyyy — month-first, year last. */
+const MDY_FULL: NumericDatePattern = {
+  regex: /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b/,
+  build: (m) => makeDate(Number(m[3]), Number(m[1]), Number(m[2])),
+};
+
+/** dd/mm/yy — day-first, 2-digit year. */
+const DMY_SHORT: NumericDatePattern = {
+  regex: /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})\b/,
+  build: (m) => makeDate(expandYear(Number(m[3])), Number(m[2]), Number(m[1])),
+};
+
+/** mm/dd/yy — month-first, 2-digit year. */
+const MDY_SHORT: NumericDatePattern = {
+  regex: /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})\b/,
+  build: (m) => makeDate(expandYear(Number(m[3])), Number(m[1]), Number(m[2])),
+};
+
+/** dd Mon yyyy / dd-Mon-yy — "20 May 2026", "20-May-26". */
+const DAY_MONTH_NAME: NumericDatePattern = {
+  regex: /\b(\d{1,2})[-/.\s]([A-Za-z]{3,9})[-/.\s](\d{2,4})\b/,
+  build: (m) => {
+    const month = parseMonthName(m[2]);
+    if (!month) return null;
+    return makeDate(expandYear(Number(m[3])), month, Number(m[1]));
   },
-  // dd-mm-yyyy or dd/mm/yyyy (preferred, common in India/EU)
-  {
-    regex: /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b/,
-    build: (m) => makeDate(Number(m[3]), Number(m[2]), Number(m[1])),
+};
+
+/** Mon dd, yyyy — "March 12, 2026". */
+const MONTH_NAME_DAY: NumericDatePattern = {
+  regex: /\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{2,4})\b/,
+  build: (m) => {
+    const month = parseMonthName(m[1]);
+    if (!month) return null;
+    return makeDate(expandYear(Number(m[3])), month, Number(m[2]));
   },
-  // dd[-/. ]Mon[-/. ]yyyy or yy   "20-May-26", "20 May 2026", "20.May.26"
-  {
-    regex: /\b(\d{1,2})[-/.\s]([A-Za-z]{3,9})[-/.\s](\d{2,4})\b/,
-    build: (m) => {
-      const month = parseMonthName(m[2]);
-      if (!month) return null;
-      return makeDate(expandYear(Number(m[3])), month, Number(m[1]));
-    },
-  },
-  // Mon dd, yyyy or yy  "March 12, 2026" / "May 20, 26"
-  {
-    regex: /\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{2,4})\b/,
-    build: (m) => {
-      const month = parseMonthName(m[1]);
-      if (!month) return null;
-      return makeDate(expandYear(Number(m[3])), month, Number(m[2]));
-    },
-  },
-  // dd-mm-yy or dd/mm/yy (2-digit year)
-  {
-    regex: /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})\b/,
-    build: (m) => makeDate(expandYear(Number(m[3])), Number(m[2]), Number(m[1])),
-  },
-];
+};
+
+function patternsFor(order: DateLocaleOrder): NumericDatePattern[] {
+  if (order === 'mdy') {
+    return [ISO_FIRST, MDY_FULL, DAY_MONTH_NAME, MONTH_NAME_DAY, MDY_SHORT];
+  }
+  return [ISO_FIRST, DMY_FULL, DAY_MONTH_NAME, MONTH_NAME_DAY, DMY_SHORT];
+}
+
+/**
+ * Detect dd-first vs mm-first from the device's resolved locale. Falls back
+ * to day-first when Intl isn't available or the locale is ambiguous.
+ */
+export function detectLocaleOrder(): DateLocaleOrder {
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).formatToParts(new Date(2024, 0, 15));
+    for (const part of parts) {
+      if (part.type === 'day') return 'dmy';
+      if (part.type === 'month') return 'mdy';
+      if (part.type === 'year') break;
+    }
+  } catch {
+    // Intl may be unavailable on Hermes without ICU — fall through.
+  }
+  return 'dmy';
+}
 
 function expandYear(year: number): number {
   if (year >= 1000) return year;
@@ -50,11 +100,12 @@ function expandYear(year: number): number {
   return year < 80 ? 2000 + year : 1900 + year;
 }
 
-export function parseDateFromText(text: string): ParsedDateResult {
+export function parseDateFromText(text: string, options: ParseDateOptions = {}): ParsedDateResult {
   if (!text) return null;
   const normalized = text.replace(/\s+/g, ' ').trim();
+  const order = options.localeOrder ?? detectLocaleOrder();
 
-  for (const pattern of NUMERIC_DATE_PATTERNS) {
+  for (const pattern of patternsFor(order)) {
     const match = normalized.match(pattern.regex);
     if (match) {
       const candidate = pattern.build(match);

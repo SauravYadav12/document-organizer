@@ -60,8 +60,14 @@ export function MoveDocumentScreen() {
         actionLabel: 'Undo',
         onActionPress: async () => {
           const current = await getDocumentById(original.id);
-          if (current) {
+          if (!current) {
+            showSnackbar({ message: 'Undo unavailable — document was deleted', kind: 'info' });
+            return;
+          }
+          try {
             await performMove(current, original.documentYear, original.documentMonth);
+          } catch {
+            showSnackbar({ message: 'Undo failed', kind: 'error' });
           }
         },
       });

@@ -1,5 +1,5 @@
 import { zip } from 'react-native-zip-archive';
-import * as FileSystem from 'expo-file-system/legacy';
+import { Directory, File } from 'expo-file-system';
 import { fileStoragePaths } from './fileStorageService';
 import type { DocumentRecord } from '../types/models';
 
@@ -14,21 +14,23 @@ type ZipOptions = {
 };
 
 export async function buildZipFromDocuments({ title, documents }: ZipOptions): Promise<string> {
-  const stagingDir = `${fileStoragePaths.temp}zip-${Date.now()}/`;
-  await FileSystem.makeDirectoryAsync(stagingDir, { intermediates: true });
+  const stagingDir = new Directory(`${fileStoragePaths.temp}zip-${Date.now()}/`);
+  stagingDir.create({ intermediates: true });
 
   try {
     for (const doc of documents) {
       const fileName = buildStagingFileName(doc);
-      await FileSystem.copyAsync({ from: doc.filePath, to: `${stagingDir}${fileName}` });
+      await new File(doc.filePath).copy(new File(stagingDir, fileName));
     }
 
     const safeTitle = title.replace(/[^A-Za-z0-9_\-]+/g, '-');
     const archiveUri = `${fileStoragePaths.temp}${safeTitle}-${Date.now()}.zip`;
-    await zip(stripFilePrefix(stagingDir), stripFilePrefix(archiveUri));
+    await zip(stripFilePrefix(stagingDir.uri), stripFilePrefix(archiveUri));
     return archiveUri.startsWith('file://') ? archiveUri : `file://${archiveUri}`;
   } finally {
-    await FileSystem.deleteAsync(stagingDir, { idempotent: true });
+    if (stagingDir.exists) {
+      stagingDir.delete();
+    }
   }
 }
 

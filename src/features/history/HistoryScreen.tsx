@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { StyleSheet, View, FlatList } from 'react-native';
+import { ActivityIndicator, RefreshControl, StyleSheet, View, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { MotiView } from 'moti';
 
@@ -12,7 +12,8 @@ import type { ActivityRecord } from '../../types/models';
 
 export function HistoryScreen() {
   const navigation = useNavigation<any>();
-  const { activities, isLoading } = useActivityFeed();
+  const { activities, isLoading, isRefreshing, isLoadingMore, refresh, loadMore } =
+    useActivityFeed();
 
   const renderItem = useCallback(
     ({ item, index }: { item: ActivityRecord; index: number }) => (
@@ -37,6 +38,12 @@ export function HistoryScreen() {
     [navigation],
   );
 
+  const footer = isLoadingMore ? (
+    <View style={styles.footer}>
+      <ActivityIndicator color={palette.primary} />
+    </View>
+  ) : undefined;
+
   return (
     <View style={styles.container}>
       <FlatList
@@ -44,6 +51,17 @@ export function HistoryScreen() {
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={footer}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={refresh}
+            tintColor={palette.primary}
+            colors={[palette.primary]}
+          />
+        }
         ListEmptyComponent={
           isLoading ? undefined : (
             <EmptyState
@@ -61,4 +79,5 @@ export function HistoryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.surface },
   listContent: { paddingVertical: spacing.md, flexGrow: 1 },
+  footer: { paddingVertical: spacing.lg, alignItems: 'center' },
 });

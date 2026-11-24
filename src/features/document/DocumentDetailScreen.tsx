@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Image as RNImage, Pressable, StyleSheet, View, ScrollView } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
+import { Alert, Pressable, StyleSheet, View, ScrollView } from 'react-native';
+import { Image as ExpoImage, type ImageLoadEventData } from 'expo-image';
 import { Text, TextInput, ActivityIndicator } from 'react-native-paper';
 import { useNavigation, useRoute, type RouteProp, useFocusEffect } from '@react-navigation/native';
 import { MotiView } from 'moti';
@@ -61,27 +61,21 @@ export function DocumentDetailScreen() {
     if (!document) return;
     let cancelled = false;
     (async () => {
-      const [size, dims] = await Promise.all([
-        getFileSizeBytes(document.filePath),
-        new Promise<{ width: number; height: number } | null>((resolve) => {
-          RNImage.getSize(
-            document.filePath,
-            (width, height) => resolve({ width, height }),
-            () => resolve(null),
-          );
-        }),
-      ]);
+      const size = await getFileSizeBytes(document.filePath);
       if (cancelled) return;
-      setFileInfo({
-        sizeBytes: size,
-        width: dims?.width ?? null,
-        height: dims?.height ?? null,
-      });
+      setFileInfo((prev) => ({ ...prev, sizeBytes: size }));
     })();
     return () => {
       cancelled = true;
     };
   }, [document]);
+
+  const handleImageLoad = useCallback((event: ImageLoadEventData) => {
+    const { width, height } = event.source ?? {};
+    if (typeof width === 'number' && typeof height === 'number') {
+      setFileInfo((prev) => ({ ...prev, width, height }));
+    }
+  }, []);
 
   if (!document) {
     return (
@@ -188,6 +182,7 @@ export function DocumentDetailScreen() {
               contentFit="contain"
               cachePolicy="memory-disk"
               transition={180}
+              onLoad={handleImageLoad}
             />
             <Text style={styles.zoomHint}>Tap to open · pinch to zoom</Text>
           </Pressable>

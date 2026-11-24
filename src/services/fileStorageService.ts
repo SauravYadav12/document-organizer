@@ -1,10 +1,11 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { Directory, File, Paths } from 'expo-file-system';
+import { Image as RNImage } from 'react-native';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
 const MAX_LONGEST_EDGE = 2000;
 const STORAGE_JPEG_QUALITY = 0.8;
 
-const ROOT_DIRECTORY = `${FileSystem.documentDirectory}docorg/`;
+const ROOT_DIRECTORY = `${Paths.document.uri}docorg/`;
 const DOCUMENTS_DIRECTORY = `${ROOT_DIRECTORY}docs/`;
 const THUMBNAILS_DIRECTORY = `${ROOT_DIRECTORY}thumbs/`;
 const TEMP_DIRECTORY = `${ROOT_DIRECTORY}tmp/`;
@@ -35,33 +36,34 @@ export function generateDocumentFileName(extension = 'jpg'): string {
 }
 
 export async function ensureStorageReady(): Promise<void> {
-  await Promise.all([
-    ensureDirectory(ROOT_DIRECTORY),
-    ensureDirectory(DOCUMENTS_DIRECTORY),
-    ensureDirectory(THUMBNAILS_DIRECTORY),
-    ensureDirectory(TEMP_DIRECTORY),
-  ]);
+  ensureDirectory(ROOT_DIRECTORY);
+  ensureDirectory(DOCUMENTS_DIRECTORY);
+  ensureDirectory(THUMBNAILS_DIRECTORY);
+  ensureDirectory(TEMP_DIRECTORY);
 }
 
-async function ensureDirectory(uri: string): Promise<void> {
-  const info = await FileSystem.getInfoAsync(uri);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(uri, { intermediates: true });
+function ensureDirectory(uri: string): void {
+  const dir = new Directory(uri);
+  if (!dir.exists) {
+    dir.create({ intermediates: true });
   }
 }
 
 export async function moveFile(fromUri: string, toUri: string): Promise<void> {
-  await ensureDirectory(parentDirectoryOf(toUri));
-  await FileSystem.moveAsync({ from: fromUri, to: toUri });
+  ensureDirectory(parentDirectoryOf(toUri));
+  await new File(fromUri).move(new File(toUri));
 }
 
 export async function copyFile(fromUri: string, toUri: string): Promise<void> {
-  await ensureDirectory(parentDirectoryOf(toUri));
-  await FileSystem.copyAsync({ from: fromUri, to: toUri });
+  ensureDirectory(parentDirectoryOf(toUri));
+  await new File(fromUri).copy(new File(toUri));
 }
 
 export async function deleteFile(uri: string): Promise<void> {
-  await FileSystem.deleteAsync(uri, { idempotent: true });
+  const file = new File(uri);
+  if (file.exists) {
+    file.delete();
+  }
 }
 
 export function parentDirectoryOf(uri: string): string {
@@ -73,14 +75,15 @@ export type CompressedImage = { uri: string; width: number; height: number };
 
 /**
  * Resize the longest edge to MAX_LONGEST_EDGE and re-encode JPEG to keep
- * storage small while preserving readability for OCR/print.
+ * storage small while preserving readability for OCR/print. The source
+ * dimensions are probed with Image.getSize (metadata-only) to avoid the
+ * extra full-image decode a `manipulateAsync` probe would cost.
  */
 export async function compressForStorage(sourceUri: string): Promise<CompressedImage> {
-  const probe = await manipulateAsync(sourceUri, [], { compress: 1, format: SaveFormat.JPEG });
-  const longest = Math.max(probe.width, probe.height);
+  const dims = await getImageDimensions(sourceUri);
   const actions =
-    longest > MAX_LONGEST_EDGE
-      ? [{ resize: probe.width >= probe.height ? { width: MAX_LONGEST_EDGE } : { height: MAX_LONGEST_EDGE } }]
+    dims && Math.max(dims.width, dims.height) > MAX_LONGEST_EDGE
+      ? [{ resize: dims.width >= dims.height ? { width: MAX_LONGEST_EDGE } : { height: MAX_LONGEST_EDGE } }]
       : [];
   const result = await manipulateAsync(sourceUri, actions, {
     compress: STORAGE_JPEG_QUALITY,
@@ -89,8 +92,18 @@ export async function compressForStorage(sourceUri: string): Promise<CompressedI
   return { uri: result.uri, width: result.width, height: result.height };
 }
 
+function getImageDimensions(uri: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    RNImage.getSize(
+      uri,
+      (width, height) => resolve({ width, height }),
+      () => resolve(null),
+    );
+  });
+}
+
 export async function getFileSizeBytes(uri: string): Promise<number | null> {
-  const info = await FileSystem.getInfoAsync(uri);
-  if (!info.exists) return null;
-  return 'size' in info ? info.size ?? null : null;
+  const file = new File(uri);
+  if (!file.exists) return null;
+  return file.size ?? null;
 }

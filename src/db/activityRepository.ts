@@ -31,10 +31,10 @@ export async function insertActivity(input: NewActivityInput): Promise<void> {
   );
 }
 
-export async function listRecentActivity(limit = 200): Promise<ActivityRecord[]> {
+export async function listRecentActivity(limit = 50, offset = 0): Promise<ActivityRecord[]> {
   const db = await getDatabase();
   return db.getAllAsync<ActivityRecord>(
-    `SELECT * FROM activity ORDER BY timestamp DESC LIMIT ?`,
-    [limit],
+    `SELECT * FROM activity ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
+    [limit, offset],
   );
 }
