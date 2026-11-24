@@ -17,6 +17,7 @@ import { MoveDocumentScreen } from '../features/document/MoveDocumentScreen';
 import { CaptureScreen } from '../features/capture/CaptureScreen';
 import { ConfirmDateScreen } from '../features/capture/ConfirmDateScreen';
 import { HistoryScreen } from '../features/history/HistoryScreen';
+import { SettingsScreen } from '../subscription/SettingsScreen';
 import { palette } from '../ui/theme';
 
 const Tabs = createBottomTabNavigator<RootTabParamList>();
@@ -54,6 +55,11 @@ function LibraryStackNavigator() {
           presentation: 'fullScreenModal',
           animation: 'fade',
         }}
+      />
+      <LibraryStack.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{ title: 'Settings' }}
       />
     </LibraryStack.Navigator>
   );

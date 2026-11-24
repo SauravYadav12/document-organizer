@@ -6,6 +6,7 @@ export type LibraryStackParamList = {
   DocumentDetail: { documentId: number };
   MoveDocument: { documentId: number };
   DocumentViewer: { year: number; month: number; documentId: number };
+  Settings: undefined;
 };
 
 export type CaptureStackParamList = {

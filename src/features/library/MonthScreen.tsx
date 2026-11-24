@@ -10,6 +10,7 @@ import { useFolderDocuments, useMonthList } from './useLibraryData';
 import { EmptyState } from '../../ui/EmptyState';
 import { ShareFolderSheet } from '../share/ShareFolderSheet';
 import { useFolderShare } from '../share/useFolderShare';
+import { useEntitlement } from '../../subscription/useEntitlement';
 import { palette, radii, spacing } from '../../ui/theme';
 import { staggerStep, timingTransition } from '../../ui/motion';
 import type { LibraryStackParamList } from '../../navigation/screens';
@@ -30,6 +31,7 @@ export function MonthScreen() {
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const folderShare = useFolderShare();
+  const { requireEntitlement } = useEntitlement();
 
   const selectionMode = selectedIds.size > 0;
 
@@ -137,6 +139,7 @@ export function MonthScreen() {
 
   async function handleShareSelectedAsPdf() {
     if (selectedDocuments.length === 0) return;
+    if (!requireEntitlement()) return;
     const title = `DocOrg-${monthLabel}-${year}-${selectedDocuments.length}-docs`;
     await folderShare.sharePdf({ title, documents: selectedDocuments });
     clearSelection();
@@ -230,11 +233,15 @@ export function MonthScreen() {
         title={`${monthLabel} ${year}`}
         documents={documents}
         isExporting={folderShare.isExporting}
-        onExportZip={() =>
+        onExportZip={() => {
+          if (!requireEntitlement()) {
+            setShareSheetVisible(false);
+            return;
+          }
           folderShare
             .shareZip({ title: `DocOrg-${monthLabel}-${year}`, documents })
-            .finally(() => setShareSheetVisible(false))
-        }
+            .finally(() => setShareSheetVisible(false));
+        }}
       />
     </View>
   );
