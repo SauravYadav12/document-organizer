@@ -10,6 +10,7 @@ import { DocumentActionsBar } from './DocumentActionsBar';
 import { ShareFolderSheet } from '../share/ShareFolderSheet';
 import { useFolderShare } from '../share/useFolderShare';
 import { palette, radii, spacing } from '../../ui/theme';
+import { timingTransition } from '../../ui/motion';
 import { useSnackbar } from '../../ui/SnackbarHost';
 import { deleteDocument, getDocumentById, updateDocumentTitle } from '../../db/documentsRepository';
 import { insertActivity } from '../../db/activityRepository';
@@ -133,16 +134,25 @@ export function DocumentDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             const snapshot = document;
+            try {
+              await deleteDocument(snapshot.id);
+            } catch (err) {
+              showSnackbar({ message: 'Delete failed', kind: 'error' });
+              return;
+            }
             await deleteFile(snapshot.filePath);
             await deleteFile(snapshot.thumbnailPath);
-            await deleteDocument(snapshot.id);
-            await insertActivity({
-              activityType: 'deleted',
-              documentId: null,
-              documentTitle: snapshot.title ?? snapshot.documentDate,
-              fromYear: snapshot.documentYear,
-              fromMonth: snapshot.documentMonth,
-            });
+            try {
+              await insertActivity({
+                activityType: 'deleted',
+                documentId: null,
+                documentTitle: snapshot.title ?? snapshot.documentDate,
+                fromYear: snapshot.documentYear,
+                fromMonth: snapshot.documentMonth,
+              });
+            } catch {
+              // Activity log is best-effort; the document is already deleted.
+            }
             notifyLibraryChanged();
             showSnackbar({ message: 'Document deleted', kind: 'info' });
             navigation.goBack();
@@ -160,7 +170,7 @@ export function DocumentDetailScreen() {
         <MotiView
           from={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ type: 'timing', duration: 320 }}
+          transition={timingTransition(320)}
         >
           <Pressable
             style={styles.imageWrap}

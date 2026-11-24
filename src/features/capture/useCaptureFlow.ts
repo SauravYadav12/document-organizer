@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   buildDocumentPath,
   compressForStorage,
+  deleteFile,
   generateDocumentFileName,
   moveFile,
 } from '../../services/fileStorageService';
@@ -66,27 +67,45 @@ export function useCaptureFlow(photoUri: string) {
     const targetPath = buildDocumentPath(year, month, fileName);
     const compressed = await compressForStorage(photoUri);
     await moveFile(compressed.uri, targetPath);
-    const thumbnailPath = await generateThumbnail(targetPath, fileName);
+
+    let thumbnailPath: string;
+    try {
+      thumbnailPath = await generateThumbnail(targetPath, fileName);
+    } catch (err) {
+      await deleteFile(targetPath);
+      throw err;
+    }
 
     const cleanedTitle = detection.detectedTitle?.trim() || null;
-    const documentRecord = await insertDocument({
-      filePath: targetPath,
-      thumbnailPath,
-      documentYear: year,
-      documentMonth: month,
-      documentDate: formatIsoDate(detection.date),
-      dateSource: detection.source,
-      ocrText: detection.ocrText,
-      title: cleanedTitle,
-    });
+    let documentRecord: DocumentRecord;
+    try {
+      documentRecord = await insertDocument({
+        filePath: targetPath,
+        thumbnailPath,
+        documentYear: year,
+        documentMonth: month,
+        documentDate: formatIsoDate(detection.date),
+        dateSource: detection.source,
+        ocrText: detection.ocrText,
+        title: cleanedTitle,
+      });
+    } catch (err) {
+      await deleteFile(targetPath);
+      await deleteFile(thumbnailPath);
+      throw err;
+    }
 
-    await insertActivity({
-      activityType: 'created',
-      documentId: documentRecord.id,
-      documentTitle: documentRecord.title ?? formatHumanDate(detection.date),
-      toYear: year,
-      toMonth: month,
-    });
+    try {
+      await insertActivity({
+        activityType: 'created',
+        documentId: documentRecord.id,
+        documentTitle: documentRecord.title ?? formatHumanDate(detection.date),
+        toYear: year,
+        toMonth: month,
+      });
+    } catch {
+      // Activity log is best-effort; the document is already saved.
+    }
     notifyLibraryChanged();
     return documentRecord;
   }
